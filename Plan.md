@@ -1,0 +1,173 @@
+# Plan de implementación · robot-2d-cliente-referencia-python
+
+Este plan detalla cómo construir el cliente de control de referencia descrito en el [README del repositorio común](https://github.com/ojgarciab/carrera-robots-autonomos). Todavía no hay código: es una propuesta para revisar antes de empezar.
+
+La API que usa el cliente se propone en el [`Plan.md` de la pasarela](https://github.com/ghCreaR/robot-2d-pasarela/blob/main/Plan.md#3-contratos-que-hay-que-cerrar-antes-de-programar).
+
+## 1. Objetivos
+
+- Que un participante pueda **probar su primer algoritmo en minutos**, sin conocer los detalles de la API.
+- Que el código sea **didáctico**: claro, comentado y con ejemplos fáciles de modificar.
+- Cubrir **los dos medios de la API** (WebSocket y polling REST) con la misma interfaz para el algoritmo.
+- Servir de **cliente de pruebas** del servidor en la integración de extremo a extremo.
+
+## 2. Decisiones técnicas propuestas
+
+| Tema | Propuesta | Motivo |
+|------|-----------|--------|
+| Lenguaje | **Python 3.10+** | Versión aún muy extendida en los equipos de los participantes. |
+| WebSocket | **websockets** (`asyncio`) | Biblioteca madura y sencilla. |
+| REST | **httpx** (`asyncio`) | Misma interfaz síncrona y asíncrona, con buen manejo de tiempos de espera. |
+| Línea de órdenes | **argparse** | Sin dependencias extra. |
+| Pruebas | **pytest** y **pytest-asyncio**, con una pasarela falsa en proceso | |
+| Calidad | **ruff** y **mypy** | |
+| Publicación | Paquete instalable con `pip install git+https://…` y, más adelante, PyPI | |
+
+Internamente es asíncrono, pero el participante puede escribir su algoritmo como una **función normal (síncrona)**: la biblioteca la llama en cada lectura. Así no hace falta saber `asyncio` para empezar.
+
+## 3. Estructura del repositorio
+
+```
+robot-2d-cliente-referencia-python/
+├── pyproject.toml
+├── src/robot_cliente/
+│   ├── __init__.py          # Cliente, Algoritmo, Lectura
+│   ├── __main__.py          # línea de órdenes: robot-cliente
+│   ├── config.py            # pasarela, token (entorno o fichero), mundo, modelo…
+│   ├── cliente.py           # ciclo: entrar, bucle de control, salir
+│   ├── transporte/
+│   │   ├── base.py          # interfaz común
+│   │   ├── websocket.py     # telemetría empujada por el servidor
+│   │   └── rest.py          # polling con ?esperar=1 (long polling)
+│   ├── reloj.py             # ping: rtt, desfase de reloj y latencia de cada muestra
+│   ├── modelo.py            # definición del robot (GET /robots/<id>)
+│   └── algoritmos/
+│       ├── base.py          # clase Algoritmo
+│       ├── reglas_3ir.py    # seguidor por reglas para 3 sensores
+│       ├── pid_5ir.py       # seguidor PID para 5 sensores
+│       └── busqueda.py      # búsqueda inicial de la línea
+├── ejemplos/
+│   ├── minimo.py            # el algoritmo más corto posible, muy comentado
+│   └── registrar.py         # guarda las lecturas en CSV para analizarlas
+└── tests/
+```
+
+## 4. Diseño de la biblioteca
+
+### 4.1. Interfaz para el algoritmo
+
+```python
+@dataclass
+class Lectura:
+    valores: dict[str, float]   # id del sensor -> valor
+    ts: float                   # marca del servidor (ms)
+    dt: float | None            # s desde la lectura anterior (para PID)
+    seq: int
+    perdidas: int               # muestras perdidas desde la anterior
+
+class Algoritmo:
+    def inicio(self, modelo): ...                  # opcional: lee los ids de sensores y motores
+    def paso(self, lectura: Lectura) -> dict[str, float]: ...   # devuelve los actuadores
+    def fin(self): ...                             # opcional
+```
+
+- La biblioteca **limita los actuadores** al rango `[-1, 1]` y comprueba que los `id` existan en el modelo, con un error claro si no.
+- Los `id` de sensores y motores se leen del modelo, no se escriben a mano: así el mismo algoritmo vale para robots con nombres distintos.
+
+### 4.2. Ciclo de vida
+
+1. Lee la configuración y comprueba que el token es de lectura-escritura (prefijo `crt_rw_`).
+2. `GET /mundos`: comprueba que el mundo existe, está activo y permite el modelo elegido. Si no se indica mundo, lista los disponibles.
+3. `GET /robots/<modelo>`: carga la definición.
+4. Entra al mundo. Si está lleno, reintenta con espera creciente o termina, según una opción.
+5. **Bucle de control:** recibe cada lectura, llama a `paso()` y manda los actuadores.
+6. Con `Ctrl+C`, para los motores (manda `0` a todos), sale del mundo con `salir` si se pidió con `--salir-al-terminar` y cierra limpiamente.
+
+### 4.3. Transportes
+
+| | WebSocket | Polling REST |
+|---|---|---|
+| Lecturas | Llegan solas, empujadas por el servidor. | `GET /sensores?esperar=1&desde=<seq>`: espera al siguiente muestreo y no repite valores. |
+| Actuadores | Mensaje `actuadores` por la misma conexión. | `POST /actuadores` tras cada lectura. Como el servidor para los motores tras 5 s sin instrucciones, nunca deja pasar tanto tiempo. |
+| Desconexión | Reconecta con espera exponencial y recupera el robot si vuelve antes de 5 minutos. | Reintenta las peticiones; un error persistente se trata igual. |
+
+### 4.4. Reloj y latencia
+
+- Al empezar, y después cada pocos segundos, se hace `ping` y se calculan `rtt = t1 − t0` y `desfase ≈ ts − (t0 + t1) / 2`, con la mediana de varias medidas para filtrar el ruido.
+- Con eso se calcula la **latencia de cada muestra** (hora local de llegada − (marca del sensor − desfase)) y se muestra en el registro con `--verbose`.
+- `dt` se calcula con las **marcas del servidor**, no con la hora local, para que los términos derivativo e integral del PID no dependan de la red.
+
+## 5. Algoritmos de ejemplo
+
+### 5.1. Búsqueda inicial (común)
+
+El robot aparece en un punto aleatorio mirando al centro del mapa, así que:
+
+1. Avanza recto a velocidad moderada hasta que algún sensor ve la línea.
+2. Gira hacia el lado del sensor que la ha visto hasta centrarla y pasa al seguimiento.
+3. Si pierde la línea durante el seguimiento, gira hacia el último lado donde la vio. Si tras un tiempo no la encuentra, vuelve al paso 1.
+
+### 5.2. Robot de 3 sensores: reglas
+
+| Izq. | Centro | Der. | Acción |
+|:---:|:---:|:---:|---|
+| 0 | 1 | 0 | Recto. |
+| 1 | 1 | 0 | Giro suave a la izquierda. |
+| 1 | 0 | 0 | Giro fuerte a la izquierda. |
+| 0 | 1 | 1 | Giro suave a la derecha. |
+| 0 | 0 | 1 | Giro fuerte a la derecha. |
+| 1 | 1 | 1 | Cruce (circuito en 8): seguir recto. |
+| 1 | 0 | 1 | Situación ambigua (cruce visto de lado): mantener la última acción. |
+| 0 | 0 | 0 | Línea perdida: búsqueda (5.1, paso 3). |
+
+Las velocidades tienen en cuenta la **inercia** (0,5 m/s² de aceleración): se evita alternar entre extremos y se reduce la velocidad en las curvas.
+
+### 5.3. Robot de 5 sensores: PID
+
+- **Posición de la línea:** media ponderada de las posiciones laterales `y` de los sensores activos, leídas del modelo, con un error de `−1` a `1`.
+- **Control:** `giro = Kp·e + Ki·∫e·dt + Kd·de/dt`, con `dt` de las marcas del servidor. Limita el término integral (*anti-windup*) y lo reinicia al perder la línea.
+- **Motores:** `izq = base − giro` y `der = base + giro`, limitados a `[-1, 1]`. La velocidad base baja cuando el error es grande.
+- **Cruces del 8:** si se activan casi todos los sensores a la vez, mantiene el último giro durante unas pocas lecturas, en vez de reaccionar a la línea transversal.
+- Las constantes se ajustan desde la línea de órdenes (`--kp`, `--ki`, `--kd`, `--base`) para experimentar.
+
+## 6. Fases de implementación
+
+### Fase 0 · Esqueleto
+- `pyproject.toml` con el comando `robot-cliente`, `ruff`, `mypy`, `pytest` y GitHub Actions (Python 3.10 a 3.13).
+
+### Fase 1 · Pasarela falsa para pruebas
+- Una pasarela mínima en proceso (REST y WebSocket) que simula un robot muy simple. Permite desarrollar y probar el cliente sin el servidor real.
+
+### Fase 2 · Transporte REST y ciclo de vida
+- `config.py`, `rest.py`, `cliente.py`, `modelo.py` y `reloj.py`.
+- Pruebas: entrar, mundo lleno, modelo no permitido, token de solo lectura (error claro), long polling y salida limpia.
+
+### Fase 3 · Transporte WebSocket
+- `websocket.py` con autenticación, reconexión y la misma interfaz que REST.
+- Prueba: el mismo algoritmo funciona igual con los dos transportes.
+
+### Fase 4 · Algoritmos
+- Búsqueda, reglas para 3 sensores y PID para 5, con pruebas unitarias sobre lecturas sintéticas.
+- `ejemplos/minimo.py` y `ejemplos/registrar.py`.
+
+### Fase 5 · Integración con el servidor real
+- Con el `compose.yaml` del repositorio común: los dos robots completan vueltas en el óvalo y en el ocho.
+- Ajuste de los parámetros por defecto de los algoritmos.
+- Prueba de recuperación: cortar la conexión unos segundos y comprobar que se recupera el robot donde estaba.
+
+### Fase 6 · Documentación para participantes
+- Guía paso a paso en el README: instalar, conseguir el token, primer algoritmo, cómo leer el registro y consejos de ajuste del PID.
+
+## 7. Dependencias con otros repositorios
+
+| Depende de | Qué necesita |
+|------------|--------------|
+| `robot-2d-pasarela` | API REST y WebSocket (sección 3 de su `Plan.md`). Hasta que exista, se usa la pasarela falsa de la fase 1. |
+| `robot-2d-motor-fisicas` | Simulación real para la fase 5. |
+| `robot-2d-interfaz-web` | Generar el token de lectura-escritura. |
+
+## 8. Preguntas abiertas
+
+1. **Valor de los sensores IR:** con un valor analógico, el PID de 5 sensores puede usar una media ponderada por intensidad y el de 3 sensores podría usar también un PID.
+2. **Versión mínima de Python:** ¿3.10, o se puede subir a 3.12 como el servidor?
+3. **¿Se quiere también una versión síncrona** sin `asyncio`, solo con polling, aún más sencilla para principiantes?
