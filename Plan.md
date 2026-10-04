@@ -15,7 +15,7 @@ La API que usa el cliente está definida en [`contratos/api-cliente.md`](https:/
 
 | Tema | Propuesta | Motivo |
 |------|-----------|--------|
-| Lenguaje | **Python 3.10+** | Versión aún muy extendida en los equipos de los participantes. |
+| Lenguaje | **Python 3.10+** | Es la versión de Ubuntu 22.04 LTS, que aún tiene soporte, así que los participantes pueden usar el Python del sistema sin instalar otro. El código no usa nada posterior a 3.10 (por ejemplo, ni `tomllib` ni `TaskGroup`), y la CI lo comprueba. |
 | WebSocket | **websockets** (`asyncio`) | Biblioteca madura y sencilla. |
 | REST | **httpx** (`asyncio`) | Misma interfaz síncrona y asíncrona, con buen manejo de tiempos de espera. |
 | Línea de órdenes | **argparse** | Sin dependencias extra. |
@@ -106,6 +106,7 @@ El robot aparece en un punto aleatorio mirando al centro del mapa, así que:
 1. Avanza recto a velocidad moderada hasta que algún sensor ve la línea.
 2. Gira hacia el lado del sensor que la ha visto hasta centrarla y pasa al seguimiento.
 3. Si pierde la línea durante el seguimiento, gira hacia el último lado donde la vio. Si tras un tiempo no la encuentra, vuelve al paso 1.
+4. Si lleva demasiado tiempo sin ver la línea, por ejemplo porque está contra una pared o porque otro robot lo ha empujado, retrocede un poco, gira un ángulo aleatorio y vuelve al paso 1. El cliente no sabe dónde está (solo ve sus sensores), así que se guía solo por el tiempo.
 
 ### 5.2. Robot de 3 sensores: reglas
 
@@ -169,8 +170,9 @@ Las velocidades tienen en cuenta la **inercia** (0,5 m/s² de aceleración): se 
 ## 8. Decisiones tomadas
 
 - **Sensores IR:** digitales (`0`/`1`) para empezar. Los algoritmos tratan los valores como números, así que funcionarán también con el sensor promediado previsto (`0` a `1`).
+- **Python 3.10 como mínimo**, por compatibilidad con las versiones de Ubuntu que aún tienen soporte.
+- **Choques:** los robots pueden empujarse y chocar con las paredes. Los algoritmos de ejemplo no lo evitan a propósito, pero la búsqueda de la línea debe recuperarse si el robot queda contra una pared (por ejemplo, retrocediendo y girando si lleva un tiempo sin avanzar ni ver la línea).
 
 ## 9. Preguntas abiertas
 
-1. **Versión mínima de Python:** ¿3.10, o se puede subir a 3.12 como el servidor?
-2. **¿Se quiere también una versión síncrona** sin `asyncio`, solo con polling, aún más sencilla para principiantes?
+1. **¿Se quiere también una versión síncrona** sin `asyncio`, solo con polling, aún más sencilla para principiantes?
