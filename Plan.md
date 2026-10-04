@@ -8,7 +8,7 @@ La API que usa el cliente está definida en [`contratos/api-cliente.md`](https:/
 
 - Que un participante pueda **probar su primer algoritmo en minutos**, sin conocer los detalles de la API.
 - Que el código sea **didáctico**: claro, comentado y con ejemplos fáciles de modificar.
-- Cubrir **los dos medios de la API** (WebSocket y polling REST) con la misma interfaz para el algoritmo.
+- Usar **WebSocket** para los datos en tiempo real, que es el medio de menor latencia. El polling REST de la API no se usa en este cliente.
 - Servir de **cliente de pruebas** del servidor en la integración de extremo a extremo.
 
 ## 2. Decisiones técnicas propuestas
@@ -17,7 +17,7 @@ La API que usa el cliente está definida en [`contratos/api-cliente.md`](https:/
 |------|-----------|--------|
 | Lenguaje | **Python 3.10+** | Es la versión de Ubuntu 22.04 LTS, que aún tiene soporte, así que los participantes pueden usar el Python del sistema sin instalar otro. El código no usa nada posterior a 3.10 (por ejemplo, ni `tomllib` ni `TaskGroup`), y la CI lo comprueba. |
 | WebSocket | **websockets** (`asyncio`) | Biblioteca madura y sencilla. |
-| REST | **httpx** (`asyncio`) | Misma interfaz síncrona y asíncrona, con buen manejo de tiempos de espera. |
+| Consultas iniciales | **httpx** (`asyncio`) | Solo para `GET /mundos` y `GET /robots/<id>` al arrancar. |
 | Línea de órdenes | **argparse** | Sin dependencias extra. |
 | Pruebas | **pytest** y **pytest-asyncio**, con una pasarela falsa en proceso | |
 | Calidad | **ruff** y **mypy** | |
@@ -35,10 +35,8 @@ robot-2d-cliente-referencia-python/
 │   ├── __main__.py          # línea de órdenes: robot-cliente
 │   ├── config.py            # pasarela, token (entorno o fichero), mundo, modelo…
 │   ├── cliente.py           # ciclo: entrar, bucle de control, salir
-│   ├── transporte/
-│   │   ├── base.py          # interfaz común
-│   │   ├── websocket.py     # telemetría empujada por el servidor
-│   │   └── rest.py          # polling con ?esperar=1 (long polling)
+│   ├── conexion.py          # WebSocket: autenticar, entrar, lecturas, actuadores, reconexión
+│   ├── consultas.py         # GET /mundos y GET /robots/<id>
 │   ├── reloj.py             # ping: rtt, desfase de reloj y latencia de cada muestra
 │   ├── modelo.py            # definición del robot (GET /robots/<id>)
 │   └── algoritmos/
@@ -83,13 +81,14 @@ class Algoritmo:
 5. **Bucle de control:** recibe cada lectura, llama a `paso()` y manda los actuadores.
 6. Con `Ctrl+C`, para los motores (manda `0` a todos), sale del mundo con `salir` si se pidió con `--salir-al-terminar` y cierra limpiamente.
 
-### 4.3. Transportes
+### 4.3. Conexión WebSocket
 
-| | WebSocket | Polling REST |
-|---|---|---|
-| Lecturas | Llegan solas, empujadas por el servidor. | `GET /sensores?esperar=1&desde=<seq>`: espera al siguiente muestreo y no repite valores. |
-| Actuadores | Mensaje `actuadores` por la misma conexión. | `POST /actuadores` tras cada lectura. Como el servidor para los motores tras 5 s sin instrucciones, nunca deja pasar tanto tiempo. |
-| Desconexión | Reconecta con espera exponencial y recupera el robot si vuelve antes de 5 minutos. | Reintenta las peticiones; un error persistente se trata igual. |
+- Abre `/ws` con la cabecera `Authorization: Bearer <token>` y manda `entrar`.
+- **Lecturas:** llegan solas, empujadas por el servidor en cuanto se toman. Si el algoritmo tarda más que el intervalo entre lecturas, se procesa siempre la **más reciente** y se cuentan las descartadas, en lugar de acumular retraso.
+- **Actuadores:** mensaje `actuadores` por la misma conexión, después de cada `paso()`.
+- **Motores:** con WebSocket, el servidor mantiene los motores activos mientras la conexión siga abierta, aunque no lleguen consignas nuevas.
+- **Desconexión:** reconecta con espera exponencial (de 1 s a 30 s) y vuelve a mandar `entrar`. Si vuelve antes de 5 minutos, recupera su robot donde esté. Mientras está desconectado, el robot frena solo hasta parar.
+- **Ping:** el comando `ping` va por la misma conexión.
 
 ### 4.4. Reloj y latencia
 
@@ -137,15 +136,16 @@ Las velocidades tienen en cuenta la **inercia** (0,5 m/s² de aceleración): se 
 - `pyproject.toml` con el comando `robot-cliente`, `ruff`, `mypy`, `pytest` y GitHub Actions (Python 3.10 a 3.13).
 
 ### Fase 1 · Pasarela falsa para pruebas
-- Una pasarela mínima en proceso (REST y WebSocket) que simula un robot muy simple. Permite desarrollar y probar el cliente sin el servidor real.
+- Una pasarela mínima en proceso (WebSocket, más `GET /mundos` y `GET /robots/<id>`) que simula un robot muy simple. Permite desarrollar y probar el cliente sin el servidor real.
 
-### Fase 2 · Transporte REST y ciclo de vida
-- `config.py`, `rest.py`, `cliente.py`, `modelo.py` y `reloj.py`.
-- Pruebas: entrar, mundo lleno, modelo no permitido, token de solo lectura (error claro), long polling y salida limpia.
+### Fase 2 · Conexión y ciclo de vida
+- `config.py`, `consultas.py`, `conexion.py`, `cliente.py`, `modelo.py` y `reloj.py`.
+- Pruebas: entrar, mundo lleno, modelo no permitido, token de solo lectura (error claro) y salida limpia.
 
-### Fase 3 · Transporte WebSocket
-- `websocket.py` con autenticación, reconexión y la misma interfaz que REST.
-- Prueba: el mismo algoritmo funciona igual con los dos transportes.
+### Fase 3 · Robustez de la conexión
+- Reconexión con espera exponencial y recuperación del robot.
+- Descarte de lecturas atrasadas si el algoritmo es lento.
+- Pruebas: cortar la conexión de la pasarela falsa y comprobar que se reconecta; un algoritmo lento procesa siempre la última lectura.
 
 ### Fase 4 · Algoritmos
 - Búsqueda, reglas para 3 sensores y PID para 5, con pruebas unitarias sobre lecturas sintéticas.
@@ -163,7 +163,7 @@ Las velocidades tienen en cuenta la **inercia** (0,5 m/s² de aceleración): se 
 
 | Depende de | Qué necesita |
 |------------|--------------|
-| `robot-2d-pasarela` | API REST y WebSocket de `contratos/api-cliente.md`. Hasta que exista, se usa la pasarela falsa de la fase 1, que implementa el mismo contrato. |
+| `robot-2d-pasarela` | WebSocket y las consultas `GET /mundos` y `GET /robots/<id>` de `contratos/api-cliente.md`. Hasta que exista, se usa la pasarela falsa de la fase 1, que implementa el mismo contrato. |
 | `robot-2d-motor-fisicas` | Simulación real para la fase 5. |
 | `robot-2d-interfaz-web` | Generar el token de lectura-escritura. |
 
@@ -171,8 +171,9 @@ Las velocidades tienen en cuenta la **inercia** (0,5 m/s² de aceleración): se 
 
 - **Sensores IR:** digitales (`0`/`1`) para empezar. Los algoritmos tratan los valores como números, así que funcionarán también con el sensor promediado previsto (`0` a `1`).
 - **Python 3.10 como mínimo**, por compatibilidad con las versiones de Ubuntu que aún tienen soporte.
+- **Solo WebSocket:** por ahora los clientes de referencia usan solo WebSocket para los datos en tiempo real. El polling REST sigue en la API para quien quiera usarlo desde otros clientes.
 - **Choques:** los robots pueden empujarse y chocar con las paredes. Los algoritmos de ejemplo no lo evitan a propósito, pero la búsqueda de la línea debe recuperarse si el robot queda contra una pared (por ejemplo, retrocediendo y girando si lleva un tiempo sin avanzar ni ver la línea).
 
 ## 9. Preguntas abiertas
 
-1. **¿Se quiere también una versión síncrona** sin `asyncio`, solo con polling, aún más sencilla para principiantes?
+Ninguna por ahora.

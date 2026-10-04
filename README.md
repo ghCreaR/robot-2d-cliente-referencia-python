@@ -10,7 +10,7 @@ En la carrera, cada participante escribe solo la "inteligencia" de su robot: lee
 
 Este repositorio es el **punto de partida** para escribir esa inteligencia en Python, y tiene dos partes:
 
-1. **Una biblioteca de conexión** que oculta los detalles de la API: autenticación con el token, elección del mundo y del robot, WebSocket o polling REST, marcas de tiempo, latencia y reconexión. Así el participante solo escribe su algoritmo.
+1. **Una biblioteca de conexión** que oculta los detalles de la API: autenticación con el token, elección del mundo y del robot, conexión **WebSocket**, marcas de tiempo, latencia y reconexión. Así el participante solo escribe su algoritmo.
 2. **Algoritmos de ejemplo** que siguen la línea con los dos robots de prácticas:
    - **3 sensores IR:** control por reglas sencillas (izquierda, centro, derecha).
    - **5 sensores IR:** control **PID** sobre la posición estimada de la línea.
@@ -20,7 +20,7 @@ Este repositorio es el **punto de partida** para escribir esa inteligencia en Py
 Sirve también como **ejemplo vivo de la API**: quien quiera escribir un cliente en otro lenguaje puede leerlo para ver cómo se usa cada parte.
 
 ```
-  ┌───────────────────────────┐   WebSocket o REST   ┌──────────┐
+  ┌───────────────────────────┐      WebSocket       ┌──────────┐
   │ tu algoritmo              │  ◄── sensores (10 Hz)│ pasarela │
   │   └─ biblioteca de cliente│  ── actuadores ─────►│          │
   └───────────────────────────┘                      └──────────┘
@@ -34,7 +34,7 @@ Se instalará como paquete de Python y se podrá usar desde la línea de órdene
 export CRT_TOKEN=crt_rw_…          # token de lectura-escritura de la interfaz de gestión
 robot-cliente --pasarela http://localhost:8080 \
               --mundo <uuid> --modelo sigue-lineas-5ir \
-              --algoritmo pid --transporte ws
+              --algoritmo pid
 ```
 
 O desde código, escribiendo solo la función de control:
