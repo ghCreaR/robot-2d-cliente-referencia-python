@@ -2,7 +2,7 @@
 
 Este plan detalla cómo construir el cliente de control de referencia descrito en el [README del repositorio común](https://github.com/ojgarciab/carrera-robots-autonomos). Todavía no hay código: es una propuesta para revisar antes de empezar.
 
-La API que usa el cliente se propone en el [`Plan.md` de la pasarela](https://github.com/ghCreaR/robot-2d-pasarela/blob/main/Plan.md#3-contratos-que-hay-que-cerrar-antes-de-programar).
+La API que usa el cliente está definida en [`contratos/api-cliente.md`](https://github.com/ojgarciab/carrera-robots-autonomos/blob/main/contratos/api-cliente.md) del repositorio común.
 
 ## 1. Objetivos
 
@@ -59,7 +59,7 @@ robot-2d-cliente-referencia-python/
 ```python
 @dataclass
 class Lectura:
-    valores: dict[str, float]   # id del sensor -> valor
+    valores: dict[str, float]   # id del sensor -> valor (hoy 0 o 1; en el futuro, de 0 a 1)
     ts: float                   # marca del servidor (ms)
     dt: float | None            # s desde la lectura anterior (para PID)
     seq: int
@@ -124,7 +124,7 @@ Las velocidades tienen en cuenta la **inercia** (0,5 m/s² de aceleración): se 
 
 ### 5.3. Robot de 5 sensores: PID
 
-- **Posición de la línea:** media ponderada de las posiciones laterales `y` de los sensores activos, leídas del modelo, con un error de `−1` a `1`.
+- **Posición de la línea:** media ponderada por el valor de cada sensor de sus posiciones laterales `y`, leídas del modelo, normalizada a un error de `−1` a `1`. Con los sensores digitales actuales es la media de los sensores activos; con el sensor promediado futuro aprovechará automáticamente los valores intermedios.
 - **Control:** `giro = Kp·e + Ki·∫e·dt + Kd·de/dt`, con `dt` de las marcas del servidor. Limita el término integral (*anti-windup*) y lo reinicia al perder la línea.
 - **Motores:** `izq = base − giro` y `der = base + giro`, limitados a `[-1, 1]`. La velocidad base baja cuando el error es grande.
 - **Cruces del 8:** si se activan casi todos los sensores a la vez, mantiene el último giro durante unas pocas lecturas, en vez de reaccionar a la línea transversal.
@@ -162,12 +162,15 @@ Las velocidades tienen en cuenta la **inercia** (0,5 m/s² de aceleración): se 
 
 | Depende de | Qué necesita |
 |------------|--------------|
-| `robot-2d-pasarela` | API REST y WebSocket (sección 3 de su `Plan.md`). Hasta que exista, se usa la pasarela falsa de la fase 1. |
+| `robot-2d-pasarela` | API REST y WebSocket de `contratos/api-cliente.md`. Hasta que exista, se usa la pasarela falsa de la fase 1, que implementa el mismo contrato. |
 | `robot-2d-motor-fisicas` | Simulación real para la fase 5. |
 | `robot-2d-interfaz-web` | Generar el token de lectura-escritura. |
 
-## 8. Preguntas abiertas
+## 8. Decisiones tomadas
 
-1. **Valor de los sensores IR:** con un valor analógico, el PID de 5 sensores puede usar una media ponderada por intensidad y el de 3 sensores podría usar también un PID.
-2. **Versión mínima de Python:** ¿3.10, o se puede subir a 3.12 como el servidor?
-3. **¿Se quiere también una versión síncrona** sin `asyncio`, solo con polling, aún más sencilla para principiantes?
+- **Sensores IR:** digitales (`0`/`1`) para empezar. Los algoritmos tratan los valores como números, así que funcionarán también con el sensor promediado previsto (`0` a `1`).
+
+## 9. Preguntas abiertas
+
+1. **Versión mínima de Python:** ¿3.10, o se puede subir a 3.12 como el servidor?
+2. **¿Se quiere también una versión síncrona** sin `asyncio`, solo con polling, aún más sencilla para principiantes?

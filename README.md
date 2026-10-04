@@ -44,7 +44,7 @@ from robot_cliente import Cliente, Algoritmo
 
 class MiAlgoritmo(Algoritmo):
     def paso(self, lectura):
-        # lectura.valores: {"ir_izquierdo": 0, "ir_central": 1, …}
+        # lectura.valores: {"ir_izquierdo": 0, "ir_central": 1, …} (sensores digitales: 0 o 1)
         # lectura.ts y lectura.dt: marca de tiempo e intervalo desde la anterior
         return {"motor_izquierdo": 0.5, "motor_derecho": 0.5}
 ```
@@ -55,6 +55,7 @@ El token se lee de una variable de entorno o de un fichero, **nunca** de un argu
 
 - [API de cliente](https://github.com/ojgarciab/carrera-robots-autonomos#api-de-cliente) y [marcas de tiempo y latencia](https://github.com/ojgarciab/carrera-robots-autonomos#marcas-de-tiempo-y-latencia)
 - [Modelos de robot](https://github.com/ojgarciab/carrera-robots-autonomos#modelos-de-robot) y [ciclo de vida del robot en el mundo](https://github.com/ojgarciab/carrera-robots-autonomos#ciclo-de-vida-del-robot-en-el-mundo)
+- [Contrato de la API de cliente](https://github.com/ojgarciab/carrera-robots-autonomos/blob/main/contratos/api-cliente.md)
 - [Plan de implementación](Plan.md)
 
 ## Licencia
