@@ -55,7 +55,7 @@ El token se lee de una variable de entorno o de un fichero, **nunca** de un argu
 
 - [API de cliente](https://github.com/ojgarciab/carrera-robots-autonomos#api-de-cliente) y [marcas de tiempo y latencia](https://github.com/ojgarciab/carrera-robots-autonomos#marcas-de-tiempo-y-latencia)
 - [Modelos de robot](https://github.com/ojgarciab/carrera-robots-autonomos#modelos-de-robot) y [ciclo de vida del robot en el mundo](https://github.com/ojgarciab/carrera-robots-autonomos#ciclo-de-vida-del-robot-en-el-mundo)
-- [Contrato de la API de cliente](https://github.com/ojgarciab/carrera-robots-autonomos/blob/main/contratos/api-cliente.md)
+- [Contrato de la API de cliente](https://github.com/ojgarciab/carrera-robots-autonomos/blob/master/contratos/api-cliente.md)
 - [Plan de implementación](Plan.md)
 
 ## Licencia

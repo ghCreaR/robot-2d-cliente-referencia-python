@@ -2,7 +2,7 @@
 
 Este plan detalla cómo construir el cliente de control de referencia descrito en el [README del repositorio común](https://github.com/ojgarciab/carrera-robots-autonomos). Todavía no hay código: es una propuesta para revisar antes de empezar.
 
-La API que usa el cliente está definida en [`contratos/api-cliente.md`](https://github.com/ojgarciab/carrera-robots-autonomos/blob/main/contratos/api-cliente.md) del repositorio común.
+La API que usa el cliente está definida en [`contratos/api-cliente.md`](https://github.com/ojgarciab/carrera-robots-autonomos/blob/master/contratos/api-cliente.md) del repositorio común.
 
 ## 1. Objetivos
 
